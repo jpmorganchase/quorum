@@ -296,18 +296,6 @@ func TestInvalidTransactions(t *testing.T) {
 	}
 }
 
-//Test for transactions that are only invalid on Quorum
-func TestQuorumInvalidTransactions(t *testing.T) {
-	pool, key := setupQuorumTxPool()
-	defer pool.Stop()
-
-	tx := transaction(0, 0, key)
-	if err := pool.AddRemote(tx); err != ErrInvalidGasPrice {
-		t.Error("expected", ErrInvalidGasPrice, "; got", err)
-	}
-
-}
-
 func TestValidateTx_whenValueZeroTransferForPrivateTransaction(t *testing.T) {
 	pool, key := setupQuorumTxPool()
 	defer pool.Stop()
