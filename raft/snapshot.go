@@ -25,7 +25,7 @@ import (
 
 type SnapshotWithHostnames struct {
 	Addresses      []Address
-	RemovedRaftIds []uint16
+	RemovedRaftIds []uint64
 	HeadBlockHash  common.Hash
 }
 
@@ -39,7 +39,7 @@ type AddressWithoutHostname struct {
 
 type SnapshotWithoutHostnames struct {
 	Addresses      []AddressWithoutHostname
-	RemovedRaftIds []uint16 // Raft IDs for permanently removed peers
+	RemovedRaftIds []uint64 // Raft IDs for removed peers, peers can be added back if they have been removed.
 	HeadBlockHash  common.Hash
 }
 
@@ -55,17 +55,15 @@ func (pm *ProtocolManager) buildSnapshot() *SnapshotWithHostnames {
 
 	numNodes := len(pm.confState.Nodes) + len(pm.confState.Learners)
 	numRemovedNodes := pm.removedPeers.Cardinality()
-
 	snapshot := &SnapshotWithHostnames{
 		Addresses:      make([]Address, numNodes),
-		RemovedRaftIds: make([]uint16, numRemovedNodes),
+		RemovedRaftIds: make([]uint64, numRemovedNodes),
 		HeadBlockHash:  pm.blockchain.CurrentBlock().Hash(),
 	}
 
 	// Populate addresses
-
 	for i, rawRaftId := range append(pm.confState.Nodes, pm.confState.Learners...) {
-		raftId := uint16(rawRaftId)
+		raftId := rawRaftId
 
 		if raftId == pm.raftId {
 			snapshot.Addresses[i] = *pm.address
@@ -78,7 +76,7 @@ func (pm *ProtocolManager) buildSnapshot() *SnapshotWithHostnames {
 	// Populate removed IDs
 	i := 0
 	for removedIface := range pm.removedPeers.Iterator().C {
-		snapshot.RemovedRaftIds[i] = removedIface.(uint16)
+		snapshot.RemovedRaftIds[i] = removedIface.(uint64)
 		i++
 	}
 	return snapshot
@@ -119,12 +117,12 @@ func (pm *ProtocolManager) triggerSnapshot(index uint64) {
 func confStateIdSet(confState raftpb.ConfState) mapset.Set {
 	set := mapset.NewSet()
 	for _, rawRaftId := range append(confState.Nodes, confState.Learners...) {
-		set.Add(uint16(rawRaftId))
+		set.Add(rawRaftId)
 	}
 	return set
 }
 
-func (pm *ProtocolManager) updateClusterMembership(newConfState raftpb.ConfState, addresses []Address, removedRaftIds []uint16) {
+func (pm *ProtocolManager) updateClusterMembership(newConfState raftpb.ConfState, addresses []Address, removedRaftIds []uint64) {
 	log.Info("updating cluster membership per raft snapshot")
 
 	prevConfState := pm.confState
@@ -141,12 +139,11 @@ func (pm *ProtocolManager) updateClusterMembership(newConfState raftpb.ConfState
 	pm.mu.Unlock()
 
 	// Remove old peers that we're still connected to
-
 	prevIds := confStateIdSet(prevConfState)
 	newIds := confStateIdSet(newConfState)
 	idsToRemove := prevIds.Difference(newIds)
 	for idIfaceToRemove := range idsToRemove.Iterator().C {
-		raftId := idIfaceToRemove.(uint16)
+		raftId := idIfaceToRemove.(uint64)
 		log.Info("removing old raft peer", "peer id", raftId)
 
 		pm.removePeer(raftId)
@@ -157,13 +154,13 @@ func (pm *ProtocolManager) updateClusterMembership(newConfState raftpb.ConfState
 	for _, tempAddress := range addresses {
 		address := tempAddress // Allocate separately on the heap for each iteration.
 
-		if address.RaftId == pm.raftId {
+		if uint64(address.RaftId) == pm.raftId {
 			// If we're a newcomer to an existing cluster, this is where we learn
 			// our own Address.
 			pm.setLocalAddress(&address)
 		} else {
 			pm.mu.RLock()
-			existingPeer := pm.peers[address.RaftId]
+			existingPeer := pm.peers[uint64(address.RaftId)]
 			pm.mu.RUnlock()
 
 			if existingPeer == nil {
@@ -349,7 +346,7 @@ func (pm *ProtocolManager) applyRaftSnapshot(raftSnapshot raftpb.Snapshot) {
 
 func (pm *ProtocolManager) syncBlockchainUntil(hash common.Hash) {
 	pm.mu.RLock()
-	peerMap := make(map[uint16]*Peer, len(pm.peers))
+	peerMap := make(map[uint64]*Peer, len(pm.peers))
 	for raftId, peer := range pm.peers {
 		peerMap[raftId] = peer
 	}

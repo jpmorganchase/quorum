@@ -429,7 +429,7 @@ func (minter *minter) buildExtraSeal(headerHash common.Hash) []byte {
 	}
 
 	//build the extraSeal struct
-	raftIdString := hexutil.EncodeUint64(uint64(minter.eth.raftProtocolManager.raftId))
+	raftIdString := hexutil.EncodeUint64(minter.eth.raftProtocolManager.raftId)
 
 	extra := extraSeal{
 		RaftId:    []byte(raftIdString[2:]), //remove the 0x prefix

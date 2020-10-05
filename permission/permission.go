@@ -595,7 +595,8 @@ func (p *PermissionCtrl) disconnectNode(enodeId string) {
 			//get the raftId for the given enodeId
 			raftId, err := raftApi.GetRaftId(enodeId)
 			if err == nil {
-				raftApi.RemovePeer(raftId)
+				raftIdStr := raft.RaftIdToString(raftId)
+				raftApi.RemovePeer(raftIdStr)
 			} else {
 				log.Error("failed to get raft id", "err", err, "enodeId", enodeId)
 			}

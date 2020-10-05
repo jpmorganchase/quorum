@@ -292,8 +292,8 @@ var AppHelpFlagGroups = []flagGroup{
 		Flags: []cli.Flag{
 			utils.RaftModeFlag,
 			utils.RaftBlockTimeFlag,
-			utils.RaftJoinExistingFlag,
 			utils.RaftPortFlag,
+			utils.RaftJoinExistingFlag,
 			utils.RaftDNSEnabledFlag,
 		},
 	},
