@@ -3,10 +3,7 @@ module github.com/ethereum/go-ethereum
 go 1.15
 
 // Quorum - Replace Go modules that use modifications done by us
-replace (
-	github.com/coreos/etcd => github.com/Consensys/etcd v3.3.13-quorum197+incompatible
-	github.com/ethereum/go-ethereum/crypto/secp256k1 => ./crypto/secp256k1
-)
+replace github.com/coreos/etcd => github.com/Consensys/etcd v3.3.13-quorum197+incompatible
 
 // End Quorum
 
@@ -34,7 +31,6 @@ require (
 	github.com/eapache/channels v1.1.0
 	github.com/eapache/queue v1.1.0 // indirect
 	github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c
-	github.com/ethereum/go-ethereum/crypto/secp256k1 v0.0.0
 	github.com/fatih/color v1.7.0
 	github.com/fjl/memsize v0.0.0-20180418122429-ca190fb6ffbc
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
