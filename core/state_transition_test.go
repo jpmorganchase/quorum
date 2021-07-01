@@ -1026,20 +1026,22 @@ func (cfg *config) setTo(address common.Address) *config {
 }
 
 func newEVM(cfg *config) *vm.EVM {
-	context := vm.Context{
+	context := vm.BlockContext{
 		CanTransfer: CanTransfer,
 		Transfer:    Transfer,
 		GetHash:     func(uint64) common.Hash { return common.Hash{} },
 
-		Origin:      common.Address{},
 		Coinbase:    common.Address{},
 		BlockNumber: new(big.Int),
 		Time:        big.NewInt(time.Now().Unix()),
 		Difficulty:  new(big.Int),
 		GasLimit:    uint64(3450366),
-		GasPrice:    big.NewInt(0),
 	}
-	evm := vm.NewEVM(context, cfg.publicState, cfg.privateState, &params.ChainConfig{
+	txContext := vm.TxContext{
+		Origin:   common.Address{},
+		GasPrice: big.NewInt(0),
+	}
+	evm := vm.NewEVM(context, txContext, cfg.publicState, cfg.privateState, &params.ChainConfig{
 		ChainID:                  big.NewInt(1),
 		ByzantiumBlock:           new(big.Int),
 		HomesteadBlock:           new(big.Int),
@@ -1277,8 +1279,9 @@ func verifyGasPoolCalculation(t *testing.T, pm private.PrivateTransactionManager
 			data:     common.Hex2Bytes(arbitraryEncryptedPayload),
 		},
 	}
-	ctx := NewEVMContext(msg, &dualStateTestHeader, nil, &common.Address{})
-	evm := vm.NewEVM(ctx, publicState, privateState, params.QuorumTestChainConfig, vm.Config{})
+	ctx := NewEVMBlockContext(&dualStateTestHeader, nil, &common.Address{})
+	txCtx := NewEVMTxContext(msg)
+	evm := vm.NewEVM(ctx, txCtx, publicState, privateState, params.QuorumTestChainConfig, vm.Config{})
 
 	tx := types.NewTransaction(
 		0,
@@ -1290,7 +1293,7 @@ func verifyGasPoolCalculation(t *testing.T, pm private.PrivateTransactionManager
 	evm.SetCurrentTX(tx)
 
 	arbitraryBalance := big.NewInt(100000000)
-	publicState.SetBalance(evm.Coinbase, arbitraryBalance)
+	publicState.SetBalance(evm.Context.Coinbase, arbitraryBalance)
 	publicState.SetBalance(msg.From(), arbitraryBalance)
 
 	testObject := NewStateTransition(evm, msg, gasPool)
@@ -1301,7 +1304,7 @@ func verifyGasPoolCalculation(t *testing.T, pm private.PrivateTransactionManager
 	assert.False(result.Failed())
 
 	assert.Equal(new(big.Int).SetUint64(expectedGasPool.Gas()), new(big.Int).SetUint64(gasPool.Gas()), "gas pool must be calculated correctly")
-	assert.Equal(arbitraryBalance, publicState.GetBalance(evm.Coinbase), "balance must not be changed")
+	assert.Equal(arbitraryBalance, publicState.GetBalance(evm.Context.Coinbase), "balance must not be changed")
 	assert.Equal(arbitraryBalance, publicState.GetBalance(msg.From()), "balance must not be changed")
 }
 

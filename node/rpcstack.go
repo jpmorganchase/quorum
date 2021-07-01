@@ -476,6 +476,7 @@ func (is *ipcServer) start(apis []rpc.API) error {
 	}
 	listener, srv, err := rpc.StartIPCEndpoint(is.endpoint, apis)
 	if err != nil {
+		is.log.Warn("IPC opening failed", "url", is.endpoint, "error", err)
 		return err
 	}
 	srv.EnableMultitenancy(is.isMultitenant)

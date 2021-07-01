@@ -53,8 +53,9 @@ func TestDualStatePrivateToPublicCall(t *testing.T) {
 		data:     nil,
 	}
 
-	ctx := NewEVMContext(msg, &dualStateTestHeader, nil, &author)
-	env := vm.NewEVM(ctx, publicState, privateState, &params.ChainConfig{}, vm.Config{})
+	ctx := NewEVMBlockContext(&dualStateTestHeader, nil, &author)
+	txCtx := NewEVMTxContext(msg)
+	env := vm.NewEVM(ctx, txCtx, publicState, privateState, &params.ChainConfig{}, vm.Config{})
 	env.Call(vm.AccountRef(author), callAddr, msg.data, msg.gas, new(big.Int))
 
 	if value := privateState.GetState(callAddr, common.Hash{}); value != (common.Hash{10}) {
@@ -82,8 +83,9 @@ func TestDualStatePublicToPrivateCall(t *testing.T) {
 		data:     nil,
 	}
 
-	ctx := NewEVMContext(msg, &dualStateTestHeader, nil, &author)
-	env := vm.NewEVM(ctx, publicState, publicState, &params.ChainConfig{}, vm.Config{})
+	ctx := NewEVMBlockContext(&dualStateTestHeader, nil, &author)
+	txCtx := NewEVMTxContext(msg)
+	env := vm.NewEVM(ctx, txCtx, publicState, publicState, &params.ChainConfig{}, vm.Config{})
 	env.Call(vm.AccountRef(author), callAddr, msg.data, msg.gas, new(big.Int))
 
 	if value := publicState.GetState(callAddr, common.Hash{}); value != (common.Hash{}) {
@@ -111,8 +113,9 @@ func TestDualStateReadOnly(t *testing.T) {
 		data:     nil,
 	}
 
-	ctx := NewEVMContext(msg, &dualStateTestHeader, nil, &author)
-	env := vm.NewEVM(ctx, publicState, privateState, &params.ChainConfig{}, vm.Config{})
+	ctx := NewEVMBlockContext(&dualStateTestHeader, nil, &author)
+	txCtx := NewEVMTxContext(msg)
+	env := vm.NewEVM(ctx, txCtx, publicState, privateState, &params.ChainConfig{}, vm.Config{})
 	env.Call(vm.AccountRef(author), callAddr, msg.data, msg.gas, new(big.Int))
 
 	if value := publicState.GetState(common.Address{2}, common.Hash{}); value != (common.Hash{0}) {
@@ -150,8 +153,9 @@ func verifyStaticCall(t *testing.T, privateState *state.StateDB, publicState *st
 		data:     nil,
 	}
 
-	ctx := NewEVMContext(msg, &dualStateTestHeader, nil, &author)
-	env := vm.NewEVM(ctx, publicState, privateState, &params.ChainConfig{
+	ctx := NewEVMBlockContext(&dualStateTestHeader, nil, &author)
+	txCtx := NewEVMTxContext(msg)
+	env := vm.NewEVM(ctx, txCtx, publicState, privateState, &params.ChainConfig{
 		ByzantiumBlock: new(big.Int),
 	}, vm.Config{})
 

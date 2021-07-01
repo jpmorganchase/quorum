@@ -886,7 +886,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64) types.Message {
 
 	var data []byte
 	if args.Data != nil {
-		data = []byte(*args.Data)
+		data = *args.Data
 	}
 
 	msg := types.NewMessage(addr, args.To, 0, value, gas, gasPrice, data, false)
@@ -1869,7 +1869,7 @@ func runSimulation(ctx context.Context, b Backend, from common.Address, tx *type
 		//make sure that nonce is same in simulation as in actual block processing
 		//simulation blockNumber will be behind block processing blockNumber by at least 1
 		//only guaranteed to work for default config where EIP158=1
-		if evm.ChainConfig().IsEIP158(big.NewInt(evm.BlockNumber.Int64() + 1)) {
+		if evm.ChainConfig().IsEIP158(big.NewInt(evm.Context.BlockNumber.Int64() + 1)) {
 			evm.StateDB.SetNonce(contractAddr, 1)
 		}
 	}

@@ -72,6 +72,18 @@ var genesis = `{
 }
 `
 
+// spawns geth with the given command line args, using a set of flags to minimise
+// memory and disk IO. If the args don't set --datadir, the
+// child g gets a temporary data directory.
+func runMinimalGeth(t *testing.T, args ...string) *testgeth {
+	// --ropsten to make the 'writing genesis to disk' faster (no accounts)
+	// --networkid=1337 to avoid cache bump
+	// --syncmode=full to avoid allocating fast sync bloom
+	allArgs := []string{ /*"--ropsten",*/ "--nousb", "--networkid", "1337", "--syncmode=full", "--port", "0",
+		"--nat", "none", "--nodiscover", "--maxpeers", "0", "--cache", "64"}
+	return runGeth(t, append(allArgs, args...)...)
+}
+
 // Tests that a node embedded within a console can be started up properly and
 // then terminated by closing the input stream.
 func TestConsoleWelcome(t *testing.T) {
@@ -82,10 +94,7 @@ func TestConsoleWelcome(t *testing.T) {
 	defer os.RemoveAll(datadir)
 
 	// Start a geth console, make sure it's cleaned up and terminate the console
-	geth := runGeth(t,
-		"--datadir", datadir, "--port", "0", "--maxpeers", "0", "--nodiscover", "--nat", "none",
-		"--etherbase", coinbase,
-		"console")
+	geth := runMinimalGeth(t, "--datadir", datadir, "--etherbase", coinbase, "console")
 
 	// Gather all the infos the welcome message needs to contain
 	geth.SetTemplateFunc("goos", func() string { return runtime.GOOS })
@@ -115,32 +124,50 @@ To exit, press ctrl-d
 }
 
 // Tests that a console can be attached to a running node via various means.
-func TestIPCAttachWelcome(t *testing.T) {
+func TestAttachWelcome(t *testing.T) {
+	var (
+		ipc      string
+		httpPort string
+		wsPort   string
+	)
 	defer SetResetPrivateConfig("ignore")()
 	// Configure the instance for IPC attachment
 	coinbase := "0x491937757d1b26e29c507b8d4c0b233c2747e68d"
-	var ipc string
 
 	datadir := setupIstanbul(t)
 	defer os.RemoveAll(datadir)
-
 	if runtime.GOOS == "windows" {
 		ipc = `\\.\pipe\geth` + strconv.Itoa(trulyRandInt(100000, 999999))
 	} else {
 		ipc = filepath.Join(datadir, "geth.ipc")
 	}
-	geth := runGeth(t,
-		"--datadir", datadir, "--port", "0", "--maxpeers", "0", "--nodiscover", "--nat", "none",
-		"--etherbase", coinbase, "--ipcpath", ipc)
-
-	defer func() {
-		geth.Interrupt()
-		geth.ExpectExit()
-	}()
-
-	waitForEndpoint(t, ipc, 3*time.Second)
-	testAttachWelcome(t, geth, "ipc:"+ipc, ipcAPIs)
-
+	// And HTTP + WS attachment
+	p := trulyRandInt(1024, 65533) // Yeah, sometimes this will fail, sorry :P
+	httpPort = strconv.Itoa(p)
+	wsPort = strconv.Itoa(p + 1)
+	/*geth := runGeth(t,
+	"--datadir", datadir, "--port", "0", "--maxpeers", "0", "--nodiscover", "--nat", "none",
+	"--etherbase", coinbase,
+	"--http", "--http.port", httpPort, "--rpcapi", "admin,eth,net,web3",
+	"--ws", "--ws.port", wsPort, "--wsapi", "admin,eth,net,web3")*/
+	geth := runMinimalGeth(t, "--datadir", datadir, "--etherbase", coinbase,
+		"--ipcpath", ipc,
+		"--http", "--http.port", httpPort, "--rpcapi", "admin,eth,net,web3",
+		"--ws", "--ws.port", wsPort, "--wsapi", "admin,eth,net,web3")
+	t.Run("ipc", func(t *testing.T) {
+		waitForEndpoint(t, ipc, 3*time.Second)
+		testAttachWelcome(t, geth, "ipc:"+ipc, ipcAPIs)
+	})
+	t.Run("http", func(t *testing.T) {
+		endpoint := "http://127.0.0.1:" + httpPort
+		waitForEndpoint(t, endpoint, 3*time.Second)
+		testAttachWelcome(t, geth, endpoint, httpAPIs)
+	})
+	t.Run("ws", func(t *testing.T) {
+		endpoint := "ws://127.0.0.1:" + wsPort
+		waitForEndpoint(t, endpoint, 3*time.Second)
+		testAttachWelcome(t, geth, endpoint, httpAPIs)
+	})
 }
 
 func TestHTTPAttachWelcome(t *testing.T) {
@@ -193,7 +220,9 @@ func testAttachWelcome(t *testing.T, geth *testgeth, endpoint, apis string) {
 	attach.SetTemplateFunc("niltime", func() string {
 		return time.Unix(0, 0).Format("Mon Jan 02 2006 15:04:05 GMT-0700 (MST)")
 	})
-	attach.SetTemplateFunc("ipc", func() bool { return strings.HasPrefix(endpoint, "ipc") || strings.Contains(apis, "admin") })
+	attach.SetTemplateFunc("ipc", func() bool {
+		return strings.HasPrefix(endpoint, "ipc") || strings.Contains(apis, "admin")
+	})
 	attach.SetTemplateFunc("datadir", func() string { return geth.Datadir })
 	attach.SetTemplateFunc("apis", func() string { return apis })
 

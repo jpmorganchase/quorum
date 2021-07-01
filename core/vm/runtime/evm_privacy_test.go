@@ -258,20 +258,22 @@ type extendedConfig struct {
 }
 
 func newEVM(cfg *extendedConfig) *vm.EVM {
-	context := vm.Context{
+	context := vm.BlockContext{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		GetHash:     func(uint64) common.Hash { return common.Hash{} },
 
-		Origin:      cfg.Origin,
 		Coinbase:    cfg.Coinbase,
 		BlockNumber: cfg.BlockNumber,
 		Time:        cfg.Time,
 		Difficulty:  cfg.Difficulty,
 		GasLimit:    cfg.GasLimit,
-		GasPrice:    cfg.GasPrice,
 	}
-	evm := vm.NewEVM(context, cfg.State, cfg.privateState, cfg.ChainConfig, cfg.EVMConfig)
+	txContext := vm.TxContext{
+		Origin:   cfg.Origin,
+		GasPrice: cfg.GasPrice,
+	}
+	evm := vm.NewEVM(context, txContext, cfg.State, cfg.privateState, cfg.ChainConfig, cfg.EVMConfig)
 	evm.SetCurrentTX(stubPrivateTx)
 	return evm
 }

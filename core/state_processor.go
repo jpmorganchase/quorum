@@ -17,6 +17,8 @@
 package core
 
 import (
+	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -77,6 +79,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, pri
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
+	blockContext := NewEVMBlockContext(header, p.bc, nil)
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		mpsReceipt, err := p.handleMPS(i, tx, block, gp, usedGas, cfg, statedb, privateStateRepo)
@@ -97,9 +100,37 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, pri
 		privateStateDB.Prepare(tx.Hash(), block.Hash(), i)
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 
-		receipt, privateReceipt, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, privateStateDB, header, tx, usedGas, cfg, privateStateRepo.IsMPS())
+		privateStateDBToUse := PrivateStateDBForTxn(p.config.IsQuorum, tx.IsPrivate(), statedb, privateStateDB)
+
+		// Quorum - check for account permissions to execute the transaction
+		if core.IsV2Permission() {
+			if err := core.CheckAccountPermission(tx.From(), tx.To(), tx.Value(), tx.Data(), tx.Gas(), tx.GasPrice()); err != nil {
+				return nil, nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+			}
+		}
+
+		if p.config.IsQuorum && tx.GasPrice() != nil && tx.GasPrice().Cmp(common.Big0) > 0 {
+			return nil, nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), ErrInvalidGasPrice)
+		}
+
+		msg, err := tx.AsMessage(types.MakeSigner(p.config, header.Number))
 		if err != nil {
 			return nil, nil, nil, 0, err
+		}
+
+		// Quorum: this tx needs to be applied as if we were not a party
+		msg = msg.WithEmptyPrivateData(privateStateRepo.IsMPS() && tx.IsPrivate())
+
+		// the same transaction object is used for multiple executions (clear the privacy metadata - it should be updated after privacyManager.receive)
+		// when running in parallel for multiple private states is implemented - a copy of the tx may be used
+		tx.SetTxPrivacyMetadata(nil)
+
+		txContext := NewEVMTxContext(msg)
+		vmenv := vm.NewEVM(blockContext, txContext, statedb, privateStateDBToUse, p.config, cfg)
+		vmenv.SetCurrentTX(tx)
+		receipt, privateReceipt, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, privateStateDB, header, tx, usedGas, vmenv, privateStateRepo.IsMPS())
+		if err != nil {
+			return nil, nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
 		receipts = append(receipts, receipt)
@@ -216,6 +247,89 @@ func ApplyTransactionOnMPS(config *params.ChainConfig, bc *BlockChain, author *c
 
 // /Quorum
 
+func applyTransaction(msg types.Message, config *params.ChainConfig, bc *BlockChain, author *common.Address, gp *GasPool, statedb, privateStateDB *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, evm *vm.EVM, forceNonParty bool) (*types.Receipt, *types.Receipt, error) {
+	// Add addresses to access list if applicable
+	if config.IsYoloV2(header.Number) {
+		statedb.AddAddressToAccessList(msg.From())
+		if dst := msg.To(); dst != nil {
+			statedb.AddAddressToAccessList(*dst)
+			// If it's a create-tx, the destination will be added inside evm.create
+		}
+		for _, addr := range evm.ActivePrecompiles() {
+			statedb.AddAddressToAccessList(addr)
+		}
+	}
+
+	// Apply the transaction to the current state (included in the env)
+	result, err := ApplyMessage(evm, msg, gp)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Update the state with pending changes
+	var root []byte
+	if config.IsByzantium(header.Number) {
+		statedb.Finalise(true)
+	} else {
+		root = statedb.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
+	}
+	*usedGas += result.UsedGas
+
+	// If this is a private transaction, the public receipt should always
+	// indicate success.
+	publicFailed := !(config.IsQuorum && tx.IsPrivate()) && result.Failed()
+
+	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
+	// based on the eip phase, we're passing wether the root touch-delete accounts.
+	receipt := types.NewReceipt(root, publicFailed, *usedGas)
+	receipt.TxHash = tx.Hash()
+	receipt.GasUsed = result.UsedGas
+	// if the transaction created a contract, store the creation address in the receipt.
+	if msg.To() == nil {
+		receipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.Nonce())
+	}
+	// Set the receipt logs and create a bloom for filtering
+	receipt.Logs = statedb.GetLogs(tx.Hash())
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+	receipt.BlockHash = statedb.BlockHash()
+	receipt.BlockNumber = header.Number
+	receipt.TransactionIndex = uint(statedb.TxIndex())
+
+	// Quorum
+	var privateReceipt *types.Receipt
+	if config.IsQuorum && tx.IsPrivate() {
+		var privateRoot []byte
+		if config.IsByzantium(header.Number) {
+			privateStateDB.Finalise(true)
+		} else {
+			privateRoot = privateStateDB.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
+		}
+		privateReceipt = types.NewReceipt(privateRoot, result.Failed(), *usedGas)
+		privateReceipt.TxHash = tx.Hash()
+		privateReceipt.GasUsed = result.UsedGas
+		if msg.To() == nil {
+			privateReceipt.ContractAddress = crypto.CreateAddress(evm.TxContext.Origin, tx.Nonce())
+		}
+
+		privateReceipt.Logs = privateStateDB.GetLogs(tx.Hash())
+		privateReceipt.Bloom = types.CreateBloom(types.Receipts{privateReceipt})
+	}
+
+	// Save revert reason if feature enabled
+	if bc != nil && bc.saveRevertReason {
+		revertReason := result.Revert()
+		if revertReason != nil {
+			if config.IsQuorum && tx.IsPrivate() {
+				privateReceipt.RevertReason = revertReason
+			} else {
+				receipt.RevertReason = revertReason
+			}
+		}
+	}
+	// End Quorum
+
+	return receipt, privateReceipt, err
+}
+
 // ApplyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
@@ -242,93 +356,16 @@ func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common
 	}
 	// Quorum: this tx needs to be applied as if we were not a party
 	msg = msg.WithEmptyPrivateData(forceNonParty && tx.IsPrivate())
+
 	// Create a new context to be used in the EVM environment
-	context := NewEVMContext(msg, header, bc, author)
-	// Create a new environment which holds all relevant information
-	// about the transaction and calling mechanisms.
-	vmenv := vm.NewEVM(context, statedb, privateStateDbToUse, config, cfg)
+	blockContext := NewEVMBlockContext(header, bc, author)
+	txContext := NewEVMTxContext(msg)
+	vmenv := vm.NewEVM(blockContext, txContext, statedb, privateStateDbToUse, config, cfg)
+
 	// the same transaction object is used for multiple executions (clear the privacy metadata - it should be updated after privacyManager.receive)
 	// when running in parallel for multiple private states is implemented - a copy of the tx may be used
 	tx.SetTxPrivacyMetadata(nil)
 	vmenv.SetCurrentTX(tx)
 
-	if config.IsYoloV2(header.Number) {
-		statedb.AddAddressToAccessList(msg.From())
-		if dst := msg.To(); dst != nil {
-			statedb.AddAddressToAccessList(*dst)
-			// If it's a create-tx, the destination will be added inside evm.create
-		}
-		for _, addr := range vmenv.ActivePrecompiles() {
-			statedb.AddAddressToAccessList(addr)
-		}
-	}
-
-	// Apply the transaction to the current state (included in the env)
-	result, err := ApplyMessage(vmenv, msg, gp)
-	if err != nil {
-		return nil, nil, err
-	}
-	// Update the state with pending changes
-	var root []byte
-	if config.IsByzantium(header.Number) {
-		statedb.Finalise(true)
-	} else {
-		root = statedb.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
-	}
-	*usedGas += result.UsedGas
-
-	// If this is a private transaction, the public receipt should always
-	// indicate success.
-	publicFailed := !(config.IsQuorum && tx.IsPrivate()) && result.Failed()
-
-	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
-	// based on the eip phase, we're passing wether the root touch-delete accounts.
-	receipt := types.NewReceipt(root, publicFailed, *usedGas)
-	receipt.TxHash = tx.Hash()
-	receipt.GasUsed = result.UsedGas
-	// if the transaction created a contract, store the creation address in the receipt.
-	if msg.To() == nil {
-		receipt.ContractAddress = crypto.CreateAddress(vmenv.Context.Origin, tx.Nonce())
-	}
-	// Set the receipt logs and create a bloom for filtering
-	receipt.Logs = statedb.GetLogs(tx.Hash())
-	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-	receipt.BlockHash = statedb.BlockHash()
-	receipt.BlockNumber = header.Number
-	receipt.TransactionIndex = uint(statedb.TxIndex())
-
-	// Quorum
-	var privateReceipt *types.Receipt
-	if config.IsQuorum && tx.IsPrivate() {
-		var privateRoot []byte
-		if config.IsByzantium(header.Number) {
-			privateStateDB.Finalise(true)
-		} else {
-			privateRoot = privateStateDB.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
-		}
-		privateReceipt = types.NewReceipt(privateRoot, result.Failed(), *usedGas)
-		privateReceipt.TxHash = tx.Hash()
-		privateReceipt.GasUsed = result.UsedGas
-		if msg.To() == nil {
-			privateReceipt.ContractAddress = crypto.CreateAddress(vmenv.Context.Origin, tx.Nonce())
-		}
-
-		privateReceipt.Logs = privateStateDB.GetLogs(tx.Hash())
-		privateReceipt.Bloom = types.CreateBloom(types.Receipts{privateReceipt})
-	}
-
-	// Save revert reason if feature enabled
-	if bc != nil && bc.saveRevertReason {
-		revertReason := result.Revert()
-		if revertReason != nil {
-			if config.IsQuorum && tx.IsPrivate() {
-				privateReceipt.RevertReason = revertReason
-			} else {
-				receipt.RevertReason = revertReason
-			}
-		}
-	}
-	// End Quorum
-
-	return receipt, privateReceipt, err
+	return applyTransaction(msg, config, bc, author, gp, statedb, privateStateDB, header, tx, usedGas, vmenv, forceNonParty)
 }

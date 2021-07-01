@@ -550,19 +550,20 @@ func (sb *StubBackend) IsAuthorized(authToken *proto.PreAuthenticatedAuthenticat
 
 func (sb *StubBackend) GetEVM(ctx context.Context, msg core.Message, state vm.MinimalApiState, header *types.Header) (*vm.EVM, func() error, error) {
 	sb.getEVMCalled = true
-	vmCtx := core.NewEVMContext(msg, &types.Header{
+	vmCtx := core.NewEVMBlockContext(&types.Header{
 		Coinbase:   arbitraryFrom,
 		Number:     arbitraryCurrentBlockNumber,
 		Time:       0,
 		Difficulty: big.NewInt(0),
 		GasLimit:   0,
 	}, nil, &arbitraryFrom)
+	txCtx := core.NewEVMTxContext(msg)
 	vmError := func() error {
 		return nil
 	}
 	config := params.QuorumTestChainConfig
 	config.IstanbulBlock = sb.IstanbulBlock
-	return vm.NewEVM(vmCtx, publicStateDB, privateStateDB, config, vm.Config{}), vmError, nil
+	return vm.NewEVM(vmCtx, txCtx, publicStateDB, privateStateDB, config, vm.Config{}), vmError, nil
 }
 
 func (sb *StubBackend) CurrentBlock() *types.Block {

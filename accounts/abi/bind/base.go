@@ -32,7 +32,7 @@ import (
 
 // SignerFn is a signer function callback when a contract requires a method to
 // sign the transaction before submission.
-type SignerFn func(types.Signer, common.Address, *types.Transaction) (*types.Transaction, error)
+type SignerFn func(common.Address, *types.Transaction) (*types.Transaction, error)
 
 // Quorum
 //
@@ -282,12 +282,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if opts.Signer == nil {
 		return nil, errors.New("no signer to authorize the transaction with")
 	}
-	var signedTx *types.Transaction
-	if rawTx.IsPrivate() {
-		signedTx, err = opts.Signer(types.QuorumPrivateTxSigner{}, opts.From, rawTx)
-	} else {
-		signedTx, err = opts.Signer(types.HomesteadSigner{}, opts.From, rawTx)
-	}
+	signedTx, err := opts.Signer(opts.From, rawTx)
 	if err != nil {
 		return nil, err
 	}
