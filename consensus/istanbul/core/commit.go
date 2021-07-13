@@ -68,6 +68,15 @@ func (c *core) handleCommit(msg *message, src istanbul.Validator) error {
 
 	c.acceptCommit(msg, src)
 
+	// Change to Prepared state if we've received enough PREPARE/COMMIT messages or it is locked
+	// and we are in earlier state before Prepared state.
+	if ((c.current.IsHashLocked() && commit.Digest == c.current.GetLockedHash()) || c.current.GetPrepareOrCommitSize() >= c.QuorumSize()) &&
+		c.state.Cmp(StatePrepared) < 0 {
+		c.current.LockHash()
+		c.setState(StatePrepared)
+		c.sendCommit()
+	}
+
 	// Commit the proposal once we have enough COMMIT messages and we are not in the Committed state.
 	//
 	// If we already have a proposal, we may have chance to speed up the consensus process
