@@ -105,9 +105,9 @@ func (c *core) finalizeMessage(msg *message) ([]byte, error) {
 	msg.Address = c.Address()
 
 	// Add proof of consensus
-	msg.CommittedSeal = []byte{}
 	// Assign the CommittedSeal if it's a COMMIT message and proposal is not nil
 	if msg.Code == msgCommit && c.current.Proposal() != nil {
+		msg.CommittedSeal = []byte{}
 		seal := PrepareCommittedSeal(c.current.Proposal().Hash())
 		msg.CommittedSeal, err = c.backend.Sign(seal)
 		if err != nil {
