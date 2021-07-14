@@ -3,7 +3,7 @@ package raft
 import (
 	"errors"
 
-	"github.com/coreos/etcd/pkg/types"
+	"go.etcd.io/etcd/client/pkg/v3/types"
 )
 
 type RaftNodeInfo struct {

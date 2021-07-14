@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/wal"
-	"github.com/coreos/etcd/wal/walpb"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth"
@@ -20,6 +18,10 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/params"
+	etcdRaft "go.etcd.io/etcd/raft/v3"
+	"go.etcd.io/etcd/server/v3/wal"
+	"go.etcd.io/etcd/server/v3/wal/walpb"
+	"go.uber.org/zap"
 )
 
 // pm.advanceAppliedIndex() and state updates are in different
@@ -56,7 +58,7 @@ func TestProtocolManager_whenAppliedIndexOutOfSync(t *testing.T) {
 		for {
 			time.Sleep(10 * time.Millisecond)
 			for i := 0; i < count; i++ {
-				if raftNodes[i].raftProtocolManager.role == minterRole {
+				if raftNodes[i].raftProtocolManager.role == int(etcdRaft.StateLeader) {
 					return
 				}
 			}
@@ -95,7 +97,9 @@ func TestProtocolManager_whenAppliedIndexOutOfSync(t *testing.T) {
 
 func isWalDirStillLocked(walDir string) bool {
 	var snap walpb.Snapshot
-	w, err := wal.Open(walDir, snap)
+	// TODO: @achraf
+	lg, _ := zap.NewProduction()
+	w, err := wal.Open(lg, walDir, snap)
 	if err != nil {
 		return true
 	}

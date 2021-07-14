@@ -9,9 +9,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/coreos/etcd/raft/raftpb"
-	"github.com/coreos/etcd/snap"
-	"github.com/coreos/etcd/wal/walpb"
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -21,6 +18,9 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/permission/core"
 	"github.com/ethereum/go-ethereum/rlp"
+	"go.etcd.io/etcd/raft/v3/raftpb"
+	"go.etcd.io/etcd/server/v3/etcdserver/api/snap"
+	"go.etcd.io/etcd/server/v3/wal/walpb"
 )
 
 type SnapshotWithHostnames struct {
@@ -53,7 +53,7 @@ func (pm *ProtocolManager) buildSnapshot() *SnapshotWithHostnames {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	numNodes := len(pm.confState.Nodes) + len(pm.confState.Learners)
+	numNodes := len(pm.confState.Voters) + len(pm.confState.Learners)
 	numRemovedNodes := pm.removedPeers.Cardinality()
 
 	snapshot := &SnapshotWithHostnames{
@@ -64,7 +64,7 @@ func (pm *ProtocolManager) buildSnapshot() *SnapshotWithHostnames {
 
 	// Populate addresses
 
-	for i, rawRaftId := range append(pm.confState.Nodes, pm.confState.Learners...) {
+	for i, rawRaftId := range append(pm.confState.Voters, pm.confState.Learners...) {
 		raftId := uint16(rawRaftId)
 
 		if raftId == pm.raftId {
@@ -118,7 +118,7 @@ func (pm *ProtocolManager) triggerSnapshot(index uint64) {
 
 func confStateIdSet(confState raftpb.ConfState) mapset.Set {
 	set := mapset.NewSet()
-	for _, rawRaftId := range append(confState.Nodes, confState.Learners...) {
+	for _, rawRaftId := range append(confState.Voters, confState.Learners...) {
 		set.Add(uint16(rawRaftId))
 	}
 	return set

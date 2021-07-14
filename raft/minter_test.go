@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coreos/etcd/raft/raftpb"
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -17,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/rlp"
+	"go.etcd.io/etcd/raft/v3/raftpb"
 )
 
 const TEST_URL = "enode://3d9ca5956b38557aba991e31cf510d4df641dce9cc26bfeb7de082f0c07abb6ede3a58410c8f249dabeecee4ad3979929ac4c7c496ad20b8cfdd061b7401b4f5@127.0.0.1:21003?discport=0&raftport=50404"
@@ -200,7 +200,7 @@ func newTestRaftService(t *testing.T, raftId uint16, nodes []uint64, learners []
 		bootstrapNodes:      peers,
 		confChangeProposalC: make(chan raftpb.ConfChange),
 		removedPeers:        mapset.NewSet(),
-		confState:           raftpb.ConfState{Nodes: nodes, Learners: learners},
+		confState:           raftpb.ConfState{Voters: nodes, Learners: learners},
 		p2pServer:           mockp2p,
 	}
 	raftService := &RaftService{nodeKey: nodeKey, raftProtocolManager: raftProtocolManager}
