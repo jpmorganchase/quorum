@@ -336,7 +336,6 @@ func (p *peer) MarkTransaction(hash common.Hash) {
 	p.knownTxs.Add(hash)
 }
 
-// Quorum
 // Quorum: this was added with the origin "istanbul" implementation.
 // Send writes an RLP-encoded message with the given code.
 // data should encode as an RLP list.

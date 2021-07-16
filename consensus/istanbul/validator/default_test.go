@@ -55,7 +55,7 @@ func testNewValidatorSet(t *testing.T) {
 	}
 
 	// Create ValidatorSet
-	valSet := NewSet(ExtractValidators(b), istanbul.RoundRobin)
+	valSet := NewSet(ExtractValidators(b), istanbul.NewRoundRobinProposerPolicy())
 	if valSet == nil {
 		t.Errorf("the validator byte array cannot be parsed")
 		t.FailNow()
@@ -79,7 +79,7 @@ func testNormalValSet(t *testing.T) {
 	val1 := New(addr1)
 	val2 := New(addr2)
 
-	valSet := newDefaultSet([]common.Address{addr1, addr2}, istanbul.RoundRobin)
+	valSet := newDefaultSet([]common.Address{addr1, addr2}, istanbul.NewRoundRobinProposerPolicy())
 	if valSet == nil {
 		t.Errorf("the format of validator set is invalid")
 		t.FailNow()
@@ -129,14 +129,14 @@ func testNormalValSet(t *testing.T) {
 }
 
 func testEmptyValSet(t *testing.T) {
-	valSet := NewSet(ExtractValidators([]byte{}), istanbul.RoundRobin)
+	valSet := NewSet(ExtractValidators([]byte{}), istanbul.NewRoundRobinProposerPolicy())
 	if valSet == nil {
 		t.Errorf("validator set should not be nil")
 	}
 }
 
 func testAddAndRemoveValidator(t *testing.T) {
-	valSet := NewSet(ExtractValidators([]byte{}), istanbul.RoundRobin)
+	valSet := NewSet(ExtractValidators([]byte{}), istanbul.NewRoundRobinProposerPolicy())
 	if !valSet.AddValidator(common.StringToAddress("2")) {
 		t.Error("the validator should be added")
 	}
@@ -183,7 +183,7 @@ func testStickyProposer(t *testing.T) {
 	val1 := New(addr1)
 	val2 := New(addr2)
 
-	valSet := newDefaultSet([]common.Address{addr1, addr2}, istanbul.Sticky)
+	valSet := newDefaultSet([]common.Address{addr1, addr2}, istanbul.NewStickyProposerPolicy())
 
 	// test get proposer
 	if val := valSet.GetProposer(); !reflect.DeepEqual(val, val1) {

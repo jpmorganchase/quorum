@@ -44,6 +44,42 @@ func TestHeaderHash(t *testing.T) {
 	}
 }
 
+func TestExtractToQBFTExtra(t *testing.T) {
+	testCases := []struct {
+		istRawData     []byte
+		expectedResult *QBFTExtra
+		expectedErr    error
+	}{
+		{
+			// normal case
+			hexutil.MustDecode("0xf85a80f8549444add0ec310f115a0e603b2d7db9f067778eaf8a94294fc7e8f22b3bcdcf955dd7ff3ba2ed833f8212946beaaed781d2d2ab6350f5c4566a2c6eaac407a6948be76812f765c24641ec63dc2852b378aba2b440c080c0"),
+			&QBFTExtra{
+				VanityData: []byte{},
+				Validators: []common.Address{
+					common.BytesToAddress(hexutil.MustDecode("0x44add0ec310f115a0e603b2d7db9f067778eaf8a")),
+					common.BytesToAddress(hexutil.MustDecode("0x294fc7e8f22b3bcdcf955dd7ff3ba2ed833f8212")),
+					common.BytesToAddress(hexutil.MustDecode("0x6beaaed781d2d2ab6350f5c4566a2c6eaac407a6")),
+					common.BytesToAddress(hexutil.MustDecode("0x8be76812f765c24641ec63dc2852b378aba2b440")),
+				},
+				CommittedSeal: [][]byte{},
+				Round:         0,
+				Vote:          nil,
+			},
+			nil,
+		},
+	}
+	for _, test := range testCases {
+		h := &Header{Extra: test.istRawData}
+		istanbulExtra, err := ExtractQBFTExtra(h)
+		if err != test.expectedErr {
+			t.Errorf("expected: %v, but got: %v", test.expectedErr, err)
+		}
+		if !reflect.DeepEqual(istanbulExtra, test.expectedResult) {
+			t.Errorf("expected: %v, but got: %v", test.expectedResult, istanbulExtra)
+		}
+	}
+}
+
 func TestExtractToIstanbul(t *testing.T) {
 	testCases := []struct {
 		vanity         []byte

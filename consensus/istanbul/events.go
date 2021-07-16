@@ -23,6 +23,7 @@ type RequestEvent struct {
 
 // MessageEvent is posted for Istanbul engine communication
 type MessageEvent struct {
+	Code    uint64
 	Payload []byte
 }
 

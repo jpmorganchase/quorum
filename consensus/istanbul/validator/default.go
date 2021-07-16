@@ -19,7 +19,6 @@ package validator
 import (
 	"math"
 	"reflect"
-	"sort"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -42,14 +41,14 @@ func (val *defaultValidator) String() string {
 
 type defaultSet struct {
 	validators istanbul.Validators
-	policy     istanbul.ProposerPolicy
+	policy     *istanbul.ProposerPolicy
 
 	proposer    istanbul.Validator
 	validatorMu sync.RWMutex
 	selector    istanbul.ProposalSelector
 }
 
-func newDefaultSet(addrs []common.Address, policy istanbul.ProposerPolicy) *defaultSet {
+func newDefaultSet(addrs []common.Address, policy *istanbul.ProposerPolicy) *defaultSet {
 	valSet := &defaultSet{}
 
 	valSet.policy = policy
@@ -58,16 +57,18 @@ func newDefaultSet(addrs []common.Address, policy istanbul.ProposerPolicy) *defa
 	for i, addr := range addrs {
 		valSet.validators[i] = New(addr)
 	}
-	// sort validator
-	sort.Sort(valSet.validators)
+
+	valSet.SortValidators()
 	// init proposer
 	if valSet.Size() > 0 {
 		valSet.proposer = valSet.GetByIndex(0)
 	}
 	valSet.selector = roundRobinProposer
-	if policy == istanbul.Sticky {
+	if policy.Id == istanbul.Sticky {
 		valSet.selector = stickyProposer
 	}
+
+	policy.RegisterValidatorSet(valSet)
 
 	return valSet
 }
@@ -115,6 +116,11 @@ func (valSet *defaultSet) CalcProposer(lastProposer common.Address, round uint64
 	valSet.validatorMu.RLock()
 	defer valSet.validatorMu.RUnlock()
 	valSet.proposer = valSet.selector(valSet, lastProposer, round)
+}
+
+// ValidatorSetSorter sorts the validators based on the configured By function
+func (valSet *defaultSet) SortValidators() {
+	valSet.Policy().By.Sort(valSet.validators)
 }
 
 func calcSeed(valSet istanbul.ValidatorSet, proposer common.Address, round uint64) uint64 {
@@ -168,7 +174,7 @@ func (valSet *defaultSet) AddValidator(address common.Address) bool {
 	valSet.validators = append(valSet.validators, New(address))
 	// TODO: we may not need to re-sort it again
 	// sort validator
-	sort.Sort(valSet.validators)
+	valSet.SortValidators()
 	return true
 }
 
@@ -198,4 +204,4 @@ func (valSet *defaultSet) Copy() istanbul.ValidatorSet {
 
 func (valSet *defaultSet) F() int { return int(math.Ceil(float64(valSet.Size())/3)) - 1 }
 
-func (valSet *defaultSet) Policy() istanbul.ProposerPolicy { return valSet.policy }
+func (valSet *defaultSet) Policy() istanbul.ProposerPolicy { return *valSet.policy }

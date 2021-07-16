@@ -36,14 +36,14 @@ type Backend interface {
 	EventMux() *event.TypeMux
 
 	// Broadcast sends a message to all validators (include self)
-	Broadcast(valSet ValidatorSet, payload []byte) error
+	Broadcast(valSet ValidatorSet, code uint64, payload []byte) error
 
 	// Gossip sends a message to all validators (exclude self)
-	Gossip(valSet ValidatorSet, payload []byte) error
+	Gossip(valSet ValidatorSet, code uint64, payload []byte) error
 
 	// Commit delivers an approved proposal to backend.
 	// The delivered proposal will be put into blockchain.
-	Commit(proposal Proposal, seals [][]byte) error
+	Commit(proposal Proposal, seals [][]byte, round *big.Int) error
 
 	// Verify verifies the proposal. If a consensus.ErrFutureBlock error is returned,
 	// the time difference of the proposal and current time is also returned.
@@ -51,6 +51,9 @@ type Backend interface {
 
 	// Sign signs input data with the backend's private key
 	Sign([]byte) ([]byte, error)
+
+	// SignWithoutHashing sign input data with the backend's private key without hashing the input data
+	SignWithoutHashing([]byte) ([]byte, error)
 
 	// CheckSignature verifies the signature by checking if it's signed by
 	// the given validator
@@ -68,8 +71,14 @@ type Backend interface {
 	// ParentValidators returns the validator set of the given proposal's parent block
 	ParentValidators(proposal Proposal) ValidatorSet
 
-	// HasBadBlock returns whether the block with the hash is a bad block
+	// HasBadProposal returns whether the block with the hash is a bad block
 	HasBadProposal(hash common.Hash) bool
 
 	Close() error
+
+	// IsQBFTConsensus checks qbftBlock fork block and returns if it should be enabled
+	IsQBFTConsensusAt(*big.Int) bool
+
+	// StartQBFTConsensus stops existing legacy ibft consensus and starts the new qbft consensus
+	StartQBFTConsensus() error
 }

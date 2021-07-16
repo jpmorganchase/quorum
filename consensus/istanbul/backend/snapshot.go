@@ -23,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
 	"github.com/ethereum/go-ethereum/consensus/istanbul/validator"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 )
 
@@ -158,106 +157,6 @@ func (s *Snapshot) uncast(address common.Address, authorize bool) bool {
 	return true
 }
 
-// apply creates a new authorization snapshot by applying the given headers to
-// the original one.
-func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
-	// Allow passing in no headers for cleaner code
-	if len(headers) == 0 {
-		return s, nil
-	}
-	// Sanity check that the headers can be applied
-	for i := 0; i < len(headers)-1; i++ {
-		if headers[i+1].Number.Uint64() != headers[i].Number.Uint64()+1 {
-			return nil, errInvalidVotingChain
-		}
-	}
-	if headers[0].Number.Uint64() != s.Number+1 {
-		return nil, errInvalidVotingChain
-	}
-	// Iterate through the headers and create a new snapshot
-	snap := s.copy()
-
-	for _, header := range headers {
-		// Remove any votes on checkpoint blocks
-		number := header.Number.Uint64()
-		if number%s.Epoch == 0 {
-			snap.Votes = nil
-			snap.Tally = make(map[common.Address]Tally)
-		}
-		// Resolve the authorization key and check against validators
-		validator, err := ecrecover(header)
-		if err != nil {
-			return nil, err
-		}
-		if _, v := snap.ValSet.GetByAddress(validator); v == nil {
-			return nil, errUnauthorized
-		}
-
-		// Header authorized, discard any previous votes from the validator
-		for i, vote := range snap.Votes {
-			if vote.Validator == validator && vote.Address == header.Coinbase {
-				// Uncast the vote from the cached tally
-				snap.uncast(vote.Address, vote.Authorize)
-
-				// Uncast the vote from the chronological list
-				snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-				break // only one vote allowed
-			}
-		}
-		// Tally up the new vote from the validator
-		var authorize bool
-		switch {
-		case bytes.Equal(header.Nonce[:], nonceAuthVote):
-			authorize = true
-		case bytes.Equal(header.Nonce[:], nonceDropVote):
-			authorize = false
-		default:
-			return nil, errInvalidVote
-		}
-		if snap.cast(header.Coinbase, authorize) {
-			snap.Votes = append(snap.Votes, &Vote{
-				Validator: validator,
-				Block:     number,
-				Address:   header.Coinbase,
-				Authorize: authorize,
-			})
-		}
-		// If the vote passed, update the list of validators
-		if tally := snap.Tally[header.Coinbase]; tally.Votes > snap.ValSet.Size()/2 {
-			if tally.Authorize {
-				snap.ValSet.AddValidator(header.Coinbase)
-			} else {
-				snap.ValSet.RemoveValidator(header.Coinbase)
-
-				// Discard any previous votes the deauthorized validator cast
-				for i := 0; i < len(snap.Votes); i++ {
-					if snap.Votes[i].Validator == header.Coinbase {
-						// Uncast the vote from the cached tally
-						snap.uncast(snap.Votes[i].Address, snap.Votes[i].Authorize)
-
-						// Uncast the vote from the chronological list
-						snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-
-						i--
-					}
-				}
-			}
-			// Discard any previous votes around the just changed account
-			for i := 0; i < len(snap.Votes); i++ {
-				if snap.Votes[i].Address == header.Coinbase {
-					snap.Votes = append(snap.Votes[:i], snap.Votes[i+1:]...)
-					i--
-				}
-			}
-			delete(snap.Tally, header.Coinbase)
-		}
-	}
-	snap.Number += uint64(len(headers))
-	snap.Hash = headers[len(headers)-1].Hash()
-
-	return snap, nil
-}
-
 // validators retrieves the list of authorized validators in ascending order.
 func (s *Snapshot) validators() []common.Address {
 	validators := make([]common.Address, 0, s.ValSet.Size())
@@ -282,8 +181,8 @@ type snapshotJSON struct {
 	Tally  map[common.Address]Tally `json:"tally"`
 
 	// for validator set
-	Validators []common.Address        `json:"validators"`
-	Policy     istanbul.ProposerPolicy `json:"policy"`
+	Validators []common.Address          `json:"validators"`
+	Policy     istanbul.ProposerPolicyId `json:"policy"`
 }
 
 func (s *Snapshot) toJSONStruct() *snapshotJSON {
@@ -294,7 +193,7 @@ func (s *Snapshot) toJSONStruct() *snapshotJSON {
 		Votes:      s.Votes,
 		Tally:      s.Tally,
 		Validators: s.validators(),
-		Policy:     s.ValSet.Policy(),
+		Policy:     s.ValSet.Policy().Id,
 	}
 }
 
@@ -310,7 +209,10 @@ func (s *Snapshot) UnmarshalJSON(b []byte) error {
 	s.Hash = j.Hash
 	s.Votes = j.Votes
 	s.Tally = j.Tally
-	s.ValSet = validator.NewSet(j.Validators, j.Policy)
+
+	// Setting the By function to ValidatorSortByStringFunc should be fine, as the validator do not change only the order changes
+	pp := &istanbul.ProposerPolicy{Id: j.Policy, By: istanbul.ValidatorSortByString()}
+	s.ValSet = validator.NewSet(j.Validators, pp)
 	return nil
 }
 

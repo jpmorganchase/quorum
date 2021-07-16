@@ -203,6 +203,14 @@ func (p *peer) SendConsensus(msgcode uint64, data interface{}) error {
 	return p2p.Send(p.consensusRw, msgcode, data)
 }
 
+// SendQBFTConsensus is used to send consensus subprotocol messages from an "eth" peer without encoding the payload
+func (p *peer) SendQBFTConsensus(msgcode uint64, payload []byte) error {
+	if p.consensusRw == nil {
+		return nil
+	}
+	return p2p.SendWithNoEncoding(p.consensusRw, msgcode, payload)
+}
+
 func (p *peer) addConsensusProtoRW(rw p2p.MsgReadWriter) *peer {
 	p.consensusRw = rw
 	return p

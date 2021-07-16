@@ -43,6 +43,15 @@ func GetSignatureAddress(data []byte, sig []byte) (common.Address, error) {
 	return crypto.PubkeyToAddress(*pubkey), nil
 }
 
+// GetSignatureAddressNoHashing gets the signer address from the signature without first hashing the data
+func GetSignatureAddressNoHashing(data []byte, sig []byte) (common.Address, error) {
+	pubkey, err := crypto.SigToPub(data, sig)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return crypto.PubkeyToAddress(*pubkey), nil
+}
+
 func CheckValidatorSignature(valSet ValidatorSet, data []byte, sig []byte) (common.Address, error) {
 	// 1. Get signature address
 	signer, err := GetSignatureAddress(data, sig)

@@ -105,7 +105,7 @@ func (h *Header) Hash() common.Hash {
 	// specific hash calculation.
 	if h.MixDigest == IstanbulDigest {
 		// Seal is reserved in extra-data. To prove block is signed by the proposer.
-		if istanbulHeader := IstanbulFilteredHeader(h, true); istanbulHeader != nil {
+		if istanbulHeader := FilteredHeader(h); istanbulHeader != nil {
 			return rlpHash(istanbulHeader)
 		}
 	}
@@ -137,6 +137,11 @@ func (h *Header) SanityCheck() error {
 		return fmt.Errorf("too large block extradata: size %d", eLen)
 	}
 	return nil
+}
+
+// QBFTHashWithRoundNumber gets the hash of the Header with Only commit seal set to its null value
+func (h *Header) QBFTHashWithRoundNumber(round uint32) common.Hash {
+	return rlpHash(QBFTFilteredHeaderWithRound(h, round))
 }
 
 // hasherPool holds LegacyKeccak hashers.

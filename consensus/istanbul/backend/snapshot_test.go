@@ -25,13 +25,13 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/istanbul"
+	istanbulcommon "github.com/ethereum/go-ethereum/consensus/istanbul/common"
+	qbftengine "github.com/ethereum/go-ethereum/consensus/istanbul/qbft/engine"
+	"github.com/ethereum/go-ethereum/consensus/istanbul/testutils"
 	"github.com/ethereum/go-ethereum/consensus/istanbul/validator"
-	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
 )
 
 type testerVote struct {
@@ -53,16 +53,11 @@ func newTesterAccountPool() *testerAccountPool {
 	}
 }
 
-func (ap *testerAccountPool) sign(header *types.Header, validator string) {
-	// Ensure we have a persistent key for the validator
-	if ap.accounts[validator] == nil {
-		ap.accounts[validator], _ = crypto.GenerateKey()
-	}
-	// Sign the header and embed the signature in extra data
-	hashData := crypto.Keccak256(sigHash(header).Bytes())
-	sig, _ := crypto.Sign(hashData, ap.accounts[validator])
-
-	writeSeal(header, sig)
+func (ap *testerAccountPool) writeValidatorVote(header *types.Header, validator string, recipientAddress string, authorize bool) error {
+	return qbftengine.ApplyHeaderQBFTExtra(
+		header,
+		qbftengine.WriteVote(ap.address(recipientAddress), authorize),
+	)
 }
 
 func (ap *testerAccountPool) address(account string) common.Address {
@@ -315,6 +310,7 @@ func TestVoting(t *testing.T) {
 			results: []string{"A", "B"},
 		},
 	}
+
 	// Run through the scenarios and test them
 	for i, tt := range tests {
 		// Create the account pool and generate the initial set of validators
@@ -331,25 +327,20 @@ func TestVoting(t *testing.T) {
 				}
 			}
 		}
-		// Create the genesis block with the initial set of validators
-		genesis := &core.Genesis{
-			Difficulty: defaultDifficulty,
-			Mixhash:    types.IstanbulDigest,
-		}
-		b := genesis.ToBlock(nil)
-		extra, _ := prepareExtra(b.Header(), validators)
-		genesis.ExtraData = extra
-		// Create a pristine blockchain with the genesis injected
-		db := rawdb.NewMemoryDatabase()
-		genesis.Commit(db)
 
-		config := istanbul.DefaultConfig
+		genesis := testutils.Genesis(validators, true)
+		config := new(istanbul.Config)
+		*config = *istanbul.DefaultConfig
+		config.TestQBFTBlock = big.NewInt(0)
 		if tt.epoch != 0 {
 			config.Epoch = tt.epoch
 		}
-		engine := New(config, accounts.accounts[tt.validators[0]], db).(*backend)
-		// TODO - rebase - chain, _ := core.NewBlockChain(db, nil, genesis.Config, engine, vm.Config{}, nil, nil)
-		chain, _ := core.NewBlockChain(db, nil, params.QuorumTestChainConfig, engine, vm.Config{}, nil, nil)
+
+		chain, backend := newBlockchainFromConfig(
+			genesis,
+			[]*ecdsa.PrivateKey{accounts.accounts[tt.validators[0]]},
+			config,
+		)
 
 		// Assemble a chain of headers from the cast votes
 		headers := make([]*types.Header, len(tt.votes))
@@ -357,27 +348,35 @@ func TestVoting(t *testing.T) {
 			headers[j] = &types.Header{
 				Number:     big.NewInt(int64(j) + 1),
 				Time:       uint64(int64(j) * int64(config.BlockPeriod)),
-				Coinbase:   accounts.address(vote.voted),
-				Difficulty: defaultDifficulty,
+				Coinbase:   accounts.address(vote.validator),
+				Difficulty: istanbulcommon.DefaultDifficulty,
 				MixDigest:  types.IstanbulDigest,
 			}
-			extra, _ := prepareExtra(headers[j], validators)
-			headers[j].Extra = extra
+			_ = qbftengine.ApplyHeaderQBFTExtra(
+				headers[j],
+				qbftengine.WriteValidators(validators),
+			)
+
 			if j > 0 {
 				headers[j].ParentHash = headers[j-1].Hash()
 			}
-			if vote.auth {
-				copy(headers[j].Nonce[:], nonceAuthVote)
-			}
+
 			copy(headers[j].Extra, genesis.ExtraData)
-			accounts.sign(headers[j], vote.validator)
+
+			if len(vote.voted) > 0 {
+				if err := accounts.writeValidatorVote(headers[j], vote.validator, vote.voted, vote.auth); err != nil {
+					t.Errorf("Error writeValidatorVote test: %d, validator: %s, voteType: %v (err=%v)", j, vote.voted, vote.auth, err)
+				}
+			}
 		}
+
 		// Pass all the headers through clique and ensure tallying succeeds
 		head := headers[len(headers)-1]
 
-		snap, err := engine.snapshot(chain, head.Number.Uint64(), head.Hash(), headers)
+		snap, err := backend.snapshot(chain, head.Number.Uint64(), head.Hash(), headers)
 		if err != nil {
 			t.Errorf("test %d: failed to create voting snapshot: %v", i, err)
+			backend.Stop()
 			continue
 		}
 		// Verify the final list of validators against the expected ones
@@ -395,6 +394,7 @@ func TestVoting(t *testing.T) {
 		result := snap.validators()
 		if len(result) != len(validators) {
 			t.Errorf("test %d: validators mismatch: have %x, want %x", i, result, validators)
+			backend.Stop()
 			continue
 		}
 		for j := 0; j < len(result); j++ {
@@ -402,6 +402,7 @@ func TestVoting(t *testing.T) {
 				t.Errorf("test %d, validator %d: validator mismatch: have %x, want %x", i, j, result[j], validators[j])
 			}
 		}
+		backend.Stop()
 	}
 }
 
@@ -427,7 +428,7 @@ func TestSaveAndLoad(t *testing.T) {
 		ValSet: validator.NewSet([]common.Address{
 			common.StringToAddress("1234567894"),
 			common.StringToAddress("1234567895"),
-		}, istanbul.RoundRobin),
+		}, istanbul.NewRoundRobinProposerPolicy()),
 	}
 	db := rawdb.NewMemoryDatabase()
 	err := snap.store(db)
